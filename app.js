@@ -2,61 +2,61 @@
 
 const EPOCHS = 10;
 const BATCH_SIZE = 512;
-const TRAIN_SIZE = 55000;
-const TEST_SIZE = 10000;
-const IMAGE_SIZE = 784; // 28*28
+const TRAIN_SIZE = 10_000;
+const TEST_SIZE  = 2_000;
+const IMAGE_SIZE = 784; // 28×28
 
 // ─── MNIST Data Loader ────────────────────────────────────────────────────────
-const MNIST_IMAGES_URL = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
-const MNIST_LABELS_URL = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+// CI writes a 10 000-train + 2 000-test subset as raw uint8 binaries (~9.5 MB).
+const MNIST_IMAGES_URL = './data/mnist_images.bin';
+const MNIST_LABELS_URL = './data/mnist_labels.bin';
+const MNIST_IMAGES_BYTES = (TRAIN_SIZE + TEST_SIZE) * IMAGE_SIZE; // ~9.4 MB
 
 class MnistData {
-  constructor() {
+  constructor(onProgress) {
     this.trainImages = null;
-    this.testImages = null;
+    this.testImages  = null;
     this.trainLabels = null;
-    this.testLabels = null;
+    this.testLabels  = null;
+    this._onProgress = onProgress || (() => {});
   }
 
   async load() {
     const [imgBuffer, labelBuffer] = await Promise.all([
-      this._fetchImage(),
-      this._fetchLabels(),
+      this._stream(MNIST_IMAGES_URL, MNIST_IMAGES_BYTES),
+      this._stream(MNIST_LABELS_URL, 0),
     ]);
     const N = TRAIN_SIZE + TEST_SIZE;
-    const flatImages = imgBuffer;
+    const allImages = new Uint8Array(imgBuffer);
     const allLabels = new Uint8Array(labelBuffer);
 
-    this.trainImages = flatImages.slice(0, IMAGE_SIZE * TRAIN_SIZE);
-    this.testImages  = flatImages.slice(IMAGE_SIZE * TRAIN_SIZE, IMAGE_SIZE * N);
-    this.trainLabels = allLabels.slice(0, 10 * TRAIN_SIZE);
-    this.testLabels  = allLabels.slice(10 * TRAIN_SIZE, 10 * N);
+    // Keep as Uint8Array — normalization happens per-batch inside tf.tidy().
+    this.trainImages = allImages.subarray(0, IMAGE_SIZE * TRAIN_SIZE);
+    this.testImages  = allImages.subarray(IMAGE_SIZE * TRAIN_SIZE, IMAGE_SIZE * N);
+    this.trainLabels = allLabels.subarray(0, 10 * TRAIN_SIZE);
+    this.testLabels  = allLabels.subarray(10 * TRAIN_SIZE, 10 * N);
   }
 
-  async _fetchImage() {
-    const res = await fetch(MNIST_IMAGES_URL);
-    const blob = await res.blob();
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        const data = ctx.getImageData(0, 0, img.width, img.height).data;
-        const floats = new Float32Array(data.length / 4);
-        for (let i = 0; i < floats.length; i++) floats[i] = data[i * 4] / 255;
-        resolve(floats);
-      };
-      img.onerror = reject;
-      img.src = URL.createObjectURL(blob);
-    });
-  }
-
-  async _fetchLabels() {
-    const res = await fetch(MNIST_LABELS_URL);
-    return res.arrayBuffer();
+  async _stream(url, fallbackTotal) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Fetch failed: ${url} (${res.status})`);
+    const total = parseInt(res.headers.get('content-length') || '0') || fallbackTotal;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total) this._onProgress(received / total);
+    }
+    // Concatenate chunks then immediately drop the chunk array so GC can reclaim it.
+    const out = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+    chunks.length = 0;
+    return out.buffer;
   }
 
   getTrainBatch(batchSize) {
@@ -70,10 +70,11 @@ class MnistData {
   _getBatch(images, labels, total, n) {
     return tf.tidy(() => {
       const start = Math.floor(Math.random() * (total - n));
-      const xs = tf.tensor4d(
+      // Slice uint8, create tensor, normalise to [0,1] — only allocates for this batch.
+      const xs = tf.tensor(
         images.slice(start * IMAGE_SIZE, (start + n) * IMAGE_SIZE),
-        [n, 28, 28, 1]
-      );
+        [n, 28, 28, 1], 'int32'
+      ).toFloat().div(255);
       const ys = tf.tensor2d(
         labels.slice(start * 10, (start + n) * 10),
         [n, 10]
@@ -180,8 +181,13 @@ async function train() {
   chart.classList.remove('hidden');
 
   try {
-    mnist = new MnistData();
+    mnist = new MnistData((pct) => {
+      bar.style.width   = (pct * 50) + '%'; // first 50% of bar = download
+      label.textContent = `Downloading data… ${Math.round(pct * 100)}%`;
+    });
     await mnist.load();
+    bar.style.width   = '50%';
+    label.textContent = 'Data ready — building model…';
     setStatus('training', 'Training…');
 
     model = buildModel();
@@ -189,19 +195,37 @@ async function train() {
     chartData.trainAcc  = [];
     chartData.valAcc    = [];
 
+    // Total batches across all epochs for fine-grained progress
+    const batchesPerEpoch = Math.ceil(BATCH_SIZE * 0.9 / 128);
+    const totalBatches    = EPOCHS * batchesPerEpoch;
+    let   batchesDone     = 0;
+
     for (let epoch = 0; epoch < EPOCHS; epoch++) {
+      // Update label at epoch START so the UI never looks frozen
+      label.textContent = `Epoch ${epoch + 1} / ${EPOCHS}`;
+      if (epoch === 0) setStatus('training', 'Compiling shaders & training…');
+      await tf.nextFrame(); // yield so the browser paints before heavy work
+
       const batch = mnist.getTrainBatch(BATCH_SIZE);
       const history = await model.fit(batch.xs, batch.ys, {
         batchSize: 128,
         epochs: 1,
         validationSplit: 0.1,
         shuffle: true,
+        callbacks: {
+          onBatchEnd: async () => {
+            batchesDone++;
+            // progress bar: 50% download + 50% training
+            bar.style.width = Math.min(50 + (batchesDone / totalBatches) * 50, 100) + '%';
+            await tf.nextFrame();
+          },
+        },
       });
       tf.dispose([batch.xs, batch.ys]);
 
-      const acc  = history.history.acc[0]    ?? history.history.accuracy[0];
-      const loss = history.history.loss[0];
-      const vAcc = history.history.val_acc[0] ?? history.history.val_accuracy[0];
+      const acc  = history.history.acc?.[0]     ?? history.history.accuracy?.[0]     ?? 0;
+      const loss = history.history.loss?.[0]    ?? 0;
+      const vAcc = history.history.val_acc?.[0] ?? history.history.val_accuracy?.[0] ?? 0;
 
       chartData.trainAcc.push(acc);
       chartData.trainLoss.push(loss);
@@ -211,10 +235,7 @@ async function train() {
       document.getElementById('metricAcc').textContent    = (acc  * 100).toFixed(1) + '%';
       document.getElementById('metricLoss').textContent   = loss.toFixed(4);
       document.getElementById('metricValAcc').textContent = (vAcc * 100).toFixed(1) + '%';
-
-      const pct = ((epoch + 1) / EPOCHS) * 100;
-      bar.style.width   = pct + '%';
-      label.textContent = `Epoch ${epoch + 1} / ${EPOCHS}`;
+      setStatus('training', `Training… epoch ${epoch + 1} / ${EPOCHS}`);
     }
 
     setStatus('done', `Done — val accuracy ${(chartData.valAcc.at(-1) * 100).toFixed(1)}%`);

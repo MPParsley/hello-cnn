@@ -2,13 +2,11 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: ["claude/**", main]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -17,9 +15,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout
@@ -31,14 +26,21 @@ jobs:
             --config='{"extends":["html-validate:recommended"],"rules":{"no-trailing-whitespace":"off","void-style":"off"}}' \
             index.html || true
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - name: Download and convert MNIST data
+        run: |
+          pip3 install --quiet Pillow numpy
+          curl -fL --retry 3 \
+            "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
+            -o /tmp/mnist_images.png
+          curl -fL --retry 3 \
+            "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
+            -o /tmp/mnist_labels_uint8
+          python3 scripts/prepare_mnist.py
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: '.'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          publish_branch: gh-pages
+          exclude_assets: '.github'
