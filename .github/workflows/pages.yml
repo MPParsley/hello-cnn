@@ -23,15 +23,15 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # Python 3.12 ships with NumPy>=1.24 which removed np.object/np.bool.
-          # tensorflowjs still uses those aliases, so we pin to 3.11 where
-          # NumPy 1.23.x (last version with the aliases) is available.
+          # TF 2.15 supports Python 3.9–3.11 and ships Keras 2.x whose
+          # model.to_json() produces topology TF.js 4.x can load directly.
           python-version: '3.11'
 
       - name: Install Python dependencies
-        # tensorflow-cpu<2.18 avoids the yggdrasil_decision_forests transitive
-        # dep whose protobuf gencode (6.x) conflicts with the runtime (5.x).
-        run: pip install --quiet 'tensorflow-cpu<2.18' 'numpy<1.24' tensorflowjs Pillow
+        # No tensorflowjs: it imports jax/jax2tf (breaking API changes) and
+        # uses removed NumPy aliases (np.object). We export the TF.js
+        # LayersModel format manually — just JSON + a float32 binary shard.
+        run: pip install --quiet 'tensorflow-cpu==2.15.1' Pillow numpy
 
       - name: Train CNN and export to TF.js
         run: python scripts/train_model.py
