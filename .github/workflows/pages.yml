@@ -20,14 +20,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Python 3.12 ships with NumPy>=1.24 which removed np.object/np.bool.
+          # tensorflowjs still uses those aliases, so we pin to 3.11 where
+          # NumPy 1.23.x (last version with the aliases) is available.
+          python-version: '3.11'
+
       - name: Install Python dependencies
-        # tensorflow>=2.18 pulls in yggdrasil_decision_forests whose proto
-        # gencode (6.x) conflicts with the protobuf runtime (5.x).
-        # tensorflow-cpu<2.18 avoids that transitive dependency entirely.
-        run: pip3 install --quiet 'tensorflow-cpu<2.18' tensorflowjs Pillow numpy
+        # tensorflow-cpu<2.18 avoids the yggdrasil_decision_forests transitive
+        # dep whose protobuf gencode (6.x) conflicts with the runtime (5.x).
+        run: pip install --quiet 'tensorflow-cpu<2.18' 'numpy<1.24' tensorflowjs Pillow
 
       - name: Train CNN and export to TF.js
-        run: python3 scripts/train_model.py
+        run: python scripts/train_model.py
 
       - name: Download and prepare MNIST subsets
         run: |
@@ -37,7 +44,7 @@ jobs:
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
             -o /tmp/mnist_labels_uint8
-          python3 scripts/prepare_mnist.py
+          python scripts/prepare_mnist.py
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
