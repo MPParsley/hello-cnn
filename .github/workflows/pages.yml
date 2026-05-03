@@ -26,6 +26,16 @@ jobs:
             --config='{"extends":["html-validate:recommended"],"rules":{"no-trailing-whitespace":"off","void-style":"off"}}' \
             index.html || true
 
+      - name: Download MNIST data
+        run: |
+          mkdir -p data
+          curl -fL --retry 3 \
+            "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
+            -o data/mnist_images.png
+          curl -fL --retry 3 \
+            "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
+            -o data/mnist_labels_uint8
+
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
         with:
