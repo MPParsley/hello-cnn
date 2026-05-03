@@ -37,6 +37,7 @@ jobs:
 
       - name: Train CNN and save TF.js model
         run: node scripts/train_model.js
+        continue-on-error: true   # committed model/ is the fallback if training fails
 
       # ── Prepare MNIST subsets for in-browser training option ─────────────
       - name: Set up Python
@@ -48,6 +49,7 @@ jobs:
         run: pip install --quiet Pillow numpy
 
       - name: Download and prepare MNIST subsets
+        continue-on-error: true   # in-browser training optional; pre-trained still works
         run: |
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
@@ -63,7 +65,7 @@ jobs:
           mkdir -p dist
           cp index.html style.css app.js dist/
           cp -r model dist/model
-          cp -r data  dist/data
+          [ -d data ] && cp -r data dist/data || echo "data/ missing — skipping (in-browser training unavailable)"
 
       # ── Deploy ────────────────────────────────────────────────────────────
       - name: Setup Pages
