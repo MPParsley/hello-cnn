@@ -226,9 +226,10 @@ async function runTraining() {
 
 // ─── Drawing Canvas ───────────────────────────────────────────────────────────
 function showDrawSection() {
-  const sec = document.getElementById('drawSection');
-  sec.classList.remove('hidden');
-  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('drawNotReady').classList.add('hidden');
+  document.getElementById('drawInteractive').classList.remove('hidden');
+  document.getElementById('drawControls').classList.remove('hidden');
+  document.getElementById('drawSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function initCanvas() {

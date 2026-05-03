@@ -37,6 +37,7 @@ jobs:
 
       - name: Train CNN and save TF.js model
         run: node scripts/train_model.js
+        continue-on-error: true   # committed model/ is the fallback if training fails
 
       # ── Prepare MNIST subsets for in-browser training option ─────────────
       - name: Set up Python
@@ -48,6 +49,7 @@ jobs:
         run: pip install --quiet Pillow numpy
 
       - name: Download and prepare MNIST subsets
+        continue-on-error: true   # in-browser training optional; pre-trained still works
         run: |
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
@@ -57,6 +59,14 @@ jobs:
             -o /tmp/mnist_labels_uint8
           python scripts/prepare_mnist.py
 
+      # ── Stage site files (exclude node_modules, scripts, etc.) ──────────
+      - name: Stage site for deployment
+        run: |
+          mkdir -p dist
+          cp index.html style.css app.js dist/
+          cp -r model dist/model
+          [ -d data ] && cp -r data dist/data || echo "data/ missing — skipping (in-browser training unavailable)"
+
       # ── Deploy ────────────────────────────────────────────────────────────
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -64,7 +74,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: 'dist'
 
       - name: Deploy to GitHub Pages
         id: deployment
