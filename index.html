@@ -154,10 +154,11 @@
       </div>
     </section>
 
-    <section id="drawSection" class="draw-section hidden">
+    <section id="drawSection" class="draw-section">
       <h2>Draw a Digit</h2>
       <p>Draw any digit (0–9) and the CNN classifies it in real time.</p>
-      <div class="draw-area">
+      <p id="drawNotReady" class="draw-not-ready">Waiting for model to load…</p>
+      <div id="drawInteractive" class="hidden draw-area">
         <div class="canvas-wrap">
           <canvas id="drawCanvas" width="280" height="280"></canvas>
           <div class="canvas-label">Draw here</div>
@@ -167,7 +168,7 @@
           <div id="predBars" class="pred-bars"></div>
         </div>
       </div>
-      <div class="draw-controls">
+      <div id="drawControls" class="draw-controls hidden">
         <button id="clearBtn" type="button" class="btn secondary">Clear</button>
       </div>
       <div id="featureMapsSection" class="feature-maps-section hidden">
@@ -182,7 +183,7 @@
     <p>Built with <a href="https://www.tensorflow.org/js" target="_blank" rel="noopener">TensorFlow.js</a> · <a href="https://github.com/mpparsley/hello-cnn" target="_blank" rel="noopener">Source on GitHub</a></p>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-  <script src="app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script defer src="app.js"></script>
 </body>
 </html>
