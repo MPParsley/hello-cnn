@@ -1,16 +1,20 @@
 'use strict';
 
-const EPOCHS = 10;
-const BATCH_SIZE = 512;
-const TRAIN_SIZE = 10_000;
-const TEST_SIZE  = 2_000;
+// On mobile, use a smaller dataset and batch to stay within memory limits.
+const MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+const EPOCHS     = 10;
+const BATCH_SIZE = MOBILE ? 64   : 512;
+const TRAIN_SIZE = MOBILE ? 3000 : 10_000;
+const TEST_SIZE  = MOBILE ? 500  : 2_000;
 const IMAGE_SIZE = 784; // 28×28
 
 // ─── MNIST Data Loader ────────────────────────────────────────────────────────
 // CI writes a 10 000-train + 2 000-test subset as raw uint8 binaries (~9.5 MB).
+// Mobile only needs the first 3 500 rows of the images file.
 const MNIST_IMAGES_URL = './data/mnist_images.bin';
 const MNIST_LABELS_URL = './data/mnist_labels.bin';
-const MNIST_IMAGES_BYTES = (TRAIN_SIZE + TEST_SIZE) * IMAGE_SIZE; // ~9.4 MB
+const MNIST_IMAGES_BYTES = (TRAIN_SIZE + TEST_SIZE) * IMAGE_SIZE;
 
 class MnistData {
   constructor(onProgress) {
@@ -183,6 +187,10 @@ async function train() {
   chart.classList.remove('hidden');
 
   try {
+    // iOS WebGL is memory-constrained; CPU backend avoids GPU allocation entirely.
+    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      await tf.setBackend('cpu');
+    }
     mnist = new MnistData((pct) => {
       bar.style.width   = (pct * 50) + '%'; // first 50% of bar = download
       label.textContent = `Downloading data… ${Math.round(pct * 100)}%`;
