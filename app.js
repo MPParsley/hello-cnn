@@ -37,10 +37,12 @@ class MnistData {
     this.testLabels  = allLabels.subarray(10 * TRAIN_SIZE, 10 * N);
   }
 
-  async _stream(url, fallbackTotal) {
+  async _stream(url, knownBytes) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Fetch failed: ${url} (${res.status})`);
-    const total = parseInt(res.headers.get('content-length') || '0') || fallbackTotal;
+    // Do NOT use content-length: GitHub Pages gzip-encodes responses, so
+    // content-length reflects the compressed size while the reader yields
+    // decompressed bytes — causing received/total to wildly exceed 100%.
     const reader = res.body.getReader();
     const chunks = [];
     let received = 0;
@@ -49,7 +51,7 @@ class MnistData {
       if (done) break;
       chunks.push(value);
       received += value.length;
-      if (total) this._onProgress(received / total);
+      if (knownBytes) this._onProgress(Math.min(received / knownBytes, 1));
     }
     // Concatenate chunks then immediately drop the chunk array so GC can reclaim it.
     const out = new Uint8Array(received);
