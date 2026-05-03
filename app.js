@@ -229,7 +229,6 @@ function showDrawSection() {
   document.getElementById('drawNotReady').classList.add('hidden');
   document.getElementById('drawInteractive').classList.remove('hidden');
   document.getElementById('drawControls').classList.remove('hidden');
-  document.getElementById('drawSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function initCanvas() {
