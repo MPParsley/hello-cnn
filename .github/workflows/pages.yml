@@ -20,21 +20,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Train CNN in Node.js ──────────────────────────────────────────────
+      # @tensorflow/tfjs-node saves natively to TF.js LayersModel format so
+      # there is no Python-to-TF.js converter and no fragile Python ML
+      # dependency chain (tensorflow / jax / protobuf / numpy conflicts).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Train CNN and save TF.js model
+        run: node scripts/train_model.js
+
+      # ── Prepare MNIST subsets for in-browser training option ─────────────
+      # Only needs Pillow + numpy — no tensorflow, no version conflicts.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # TF 2.15 supports Python 3.9–3.11 and ships Keras 2.x whose
-          # model.to_json() produces topology TF.js 4.x can load directly.
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install Python dependencies
-        # No tensorflowjs: it imports jax/jax2tf (breaking API changes) and
-        # uses removed NumPy aliases (np.object). We export the TF.js
-        # LayersModel format manually — just JSON + a float32 binary shard.
-        run: pip install --quiet 'tensorflow-cpu==2.15.1' Pillow numpy
-
-      - name: Train CNN and export to TF.js
-        run: python scripts/train_model.py
+        run: pip install --quiet Pillow numpy
 
       - name: Download and prepare MNIST subsets
         run: |
@@ -52,4 +62,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .
           publish_branch: gh-pages
-          exclude_assets: '.github'
+          exclude_assets: '.github,node_modules'
