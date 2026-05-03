@@ -20,22 +20,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate HTML
-        run: |
-          npx --yes html-validate \
-            --config='{"extends":["html-validate:recommended"],"rules":{"no-trailing-whitespace":"off","void-style":"off"}}' \
-            index.html || true
+      # ── Train CNN in Node.js ──────────────────────────────────────────────
+      # @tensorflow/tfjs-node saves natively to TF.js LayersModel format so
+      # there is no Python-to-TF.js converter and no fragile Python ML
+      # dependency chain (tensorflow / jax / protobuf / numpy conflicts).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Download and convert MNIST data
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Train CNN and save TF.js model
+        run: node scripts/train_model.js
+
+      # ── Prepare MNIST subsets for in-browser training option ─────────────
+      # Only needs Pillow + numpy — no tensorflow, no version conflicts.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install --quiet Pillow numpy
+
+      - name: Download and prepare MNIST subsets
         run: |
-          pip3 install --quiet Pillow numpy
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
             -o /tmp/mnist_images.png
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
             -o /tmp/mnist_labels_uint8
-          python3 scripts/prepare_mnist.py
+          python scripts/prepare_mnist.py
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
@@ -43,4 +62,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .
           publish_branch: gh-pages
-          exclude_assets: '.github'
+          exclude_assets: '.github,node_modules'
