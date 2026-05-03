@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hello CNN — Convolutional Neural Network Demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Hello CNN</h1>
+    <p class="subtitle">A convolutional neural network that learns to read handwritten digits — running entirely in your browser.</p>
+  </header>
+
+  <main>
+    <section class="explainer">
+      <h2>What is a CNN?</h2>
+      <div class="explainer-grid">
+        <div class="explainer-card">
+          <div class="icon">&#x1F50D;</div>
+          <h3>Convolve</h3>
+          <p>Small filters slide across the image detecting edges, curves, and textures.</p>
+        </div>
+        <div class="explainer-card">
+          <div class="icon">&#x2B07;</div>
+          <h3>Pool</h3>
+          <p>Downsampling keeps the strongest signals and discards noise.</p>
+        </div>
+        <div class="explainer-card">
+          <div class="icon">&#x1F9E0;</div>
+          <h3>Learn</h3>
+          <p>Repeated layers build up from edges to shapes to digit identities.</p>
+        </div>
+        <div class="explainer-card">
+          <div class="icon">&#x1F3AF;</div>
+          <h3>Classify</h3>
+          <p>A final dense layer maps the learned features to digit probabilities.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="architecture">
+      <h2>Model Architecture</h2>
+      <div class="arch-diagram">
+        <div class="arch-block input">28×28<br><span>Input</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-block conv">Conv2D<br><span>8 filters, 3×3</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-block pool">MaxPool<br><span>2×2</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-block conv">Conv2D<br><span>16 filters, 3×3</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-block pool">MaxPool<br><span>2×2</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-block dense">Dense<br><span>64 units</span></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-block output">Softmax<br><span>10 classes</span></div>
+      </div>
+    </section>
+
+    <section class="training-section">
+      <h2>Step 1 — Train the Model</h2>
+      <p>Click <strong>Train</strong> to load MNIST data and train the CNN in your browser using TensorFlow.js. Training takes about 15–30 seconds.</p>
+      <div class="training-controls">
+        <button id="trainBtn" class="btn primary">Train CNN</button>
+        <div id="status" class="status idle">Ready to train</div>
+      </div>
+
+      <div id="progressContainer" class="progress-container hidden">
+        <div class="progress-bar-wrap">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+        <div id="progressLabel" class="progress-label">Epoch 0 / 10</div>
+      </div>
+
+      <div id="metrics" class="metrics hidden">
+        <div class="metric-card">
+          <div class="metric-value" id="metricAcc">—</div>
+          <div class="metric-label">Train Accuracy</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value" id="metricLoss">—</div>
+          <div class="metric-label">Train Loss</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value" id="metricValAcc">—</div>
+          <div class="metric-label">Val Accuracy</div>
+        </div>
+      </div>
+
+      <div id="lossChart" class="loss-chart hidden">
+        <h3>Training Curves</h3>
+        <canvas id="chartCanvas" width="600" height="220"></canvas>
+      </div>
+    </section>
+
+    <section id="drawSection" class="draw-section hidden">
+      <h2>Step 2 — Draw a Digit</h2>
+      <p>Draw any digit (0–9) on the canvas below and the CNN will classify it.</p>
+      <div class="draw-area">
+        <div class="canvas-wrap">
+          <canvas id="drawCanvas" width="280" height="280"></canvas>
+          <div class="canvas-label">Draw here</div>
+        </div>
+        <div class="predictions">
+          <h3>Predictions</h3>
+          <div id="predBars" class="pred-bars"></div>
+        </div>
+      </div>
+      <div class="draw-controls">
+        <button id="clearBtn" class="btn secondary">Clear</button>
+      </div>
+
+      <div id="featureMapsSection" class="feature-maps-section hidden">
+        <h3>What the CNN Sees</h3>
+        <p class="fmap-note">First convolutional layer activations (8 filters) for your drawing.</p>
+        <div id="featureMaps" class="feature-maps"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Built with <a href="https://www.tensorflow.org/js" target="_blank" rel="noopener">TensorFlow.js</a> · <a href="https://github.com/mpparsley/hello-cnn" target="_blank" rel="noopener">Source on GitHub</a></p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
