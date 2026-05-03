@@ -189,19 +189,36 @@ async function train() {
     chartData.trainAcc  = [];
     chartData.valAcc    = [];
 
+    // Total batches across all epochs for fine-grained progress
+    const batchesPerEpoch = Math.ceil(BATCH_SIZE * 0.9 / 128);
+    const totalBatches    = EPOCHS * batchesPerEpoch;
+    let   batchesDone     = 0;
+
     for (let epoch = 0; epoch < EPOCHS; epoch++) {
+      // Update label at epoch START so the UI never looks frozen
+      label.textContent = `Epoch ${epoch + 1} / ${EPOCHS}`;
+      if (epoch === 0) setStatus('training', 'Compiling shaders & training…');
+      await tf.nextFrame(); // yield so the browser paints before heavy work
+
       const batch = mnist.getTrainBatch(BATCH_SIZE);
       const history = await model.fit(batch.xs, batch.ys, {
         batchSize: 128,
         epochs: 1,
         validationSplit: 0.1,
         shuffle: true,
+        callbacks: {
+          onBatchEnd: async () => {
+            batchesDone++;
+            bar.style.width = Math.min((batchesDone / totalBatches) * 100, 100) + '%';
+            await tf.nextFrame();
+          },
+        },
       });
       tf.dispose([batch.xs, batch.ys]);
 
-      const acc  = history.history.acc[0]    ?? history.history.accuracy[0];
-      const loss = history.history.loss[0];
-      const vAcc = history.history.val_acc[0] ?? history.history.val_accuracy[0];
+      const acc  = history.history.acc?.[0]     ?? history.history.accuracy?.[0]     ?? 0;
+      const loss = history.history.loss?.[0]    ?? 0;
+      const vAcc = history.history.val_acc?.[0] ?? history.history.val_accuracy?.[0] ?? 0;
 
       chartData.trainAcc.push(acc);
       chartData.trainLoss.push(loss);
@@ -211,10 +228,7 @@ async function train() {
       document.getElementById('metricAcc').textContent    = (acc  * 100).toFixed(1) + '%';
       document.getElementById('metricLoss').textContent   = loss.toFixed(4);
       document.getElementById('metricValAcc').textContent = (vAcc * 100).toFixed(1) + '%';
-
-      const pct = ((epoch + 1) / EPOCHS) * 100;
-      bar.style.width   = pct + '%';
-      label.textContent = `Epoch ${epoch + 1} / ${EPOCHS}`;
+      setStatus('training', `Training… epoch ${epoch + 1} / ${EPOCHS}`);
     }
 
     setStatus('done', `Done — val accuracy ${(chartData.valAcc.at(-1) * 100).toFixed(1)}%`);
