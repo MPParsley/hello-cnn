@@ -7,24 +7,27 @@ const TEST_SIZE = 10000;
 const IMAGE_SIZE = 784; // 28*28
 
 // ─── MNIST Data Loader ────────────────────────────────────────────────────────
-const MNIST_IMAGES_URL = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
-const MNIST_LABELS_URL = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+// Files are bundled into the gh-pages branch by CI so they're same-origin.
+const MNIST_IMAGES_URL = './data/mnist_images.png';
+const MNIST_LABELS_URL = './data/mnist_labels_uint8';
+// Total compressed size is ~12 MB; report progress so the user isn't left waiting.
+const MNIST_IMAGES_BYTES = 11_800_000;
 
 class MnistData {
-  constructor() {
+  constructor(onProgress) {
     this.trainImages = null;
-    this.testImages = null;
+    this.testImages  = null;
     this.trainLabels = null;
-    this.testLabels = null;
+    this.testLabels  = null;
+    this._onProgress = onProgress || (() => {});
   }
 
   async load() {
-    const [imgBuffer, labelBuffer] = await Promise.all([
+    const [flatImages, labelBuffer] = await Promise.all([
       this._fetchImage(),
       this._fetchLabels(),
     ]);
     const N = TRAIN_SIZE + TEST_SIZE;
-    const flatImages = imgBuffer;
     const allLabels = new Uint8Array(labelBuffer);
 
     this.trainImages = flatImages.slice(0, IMAGE_SIZE * TRAIN_SIZE);
@@ -34,17 +37,30 @@ class MnistData {
   }
 
   async _fetchImage() {
+    // Stream the response so we can report download progress.
     const res = await fetch(MNIST_IMAGES_URL);
-    const blob = await res.blob();
+    if (!res.ok) throw new Error(`Failed to fetch MNIST images (${res.status})`);
+    const total = parseInt(res.headers.get('content-length') || '0') || MNIST_IMAGES_BYTES;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      this._onProgress(received / total);
+    }
+    const blob = new Blob(chunks);
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = img.width;
+        canvas.width  = img.width;
         canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
+        const ctx  = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
-        const data = ctx.getImageData(0, 0, img.width, img.height).data;
+        const data   = ctx.getImageData(0, 0, img.width, img.height).data;
         const floats = new Float32Array(data.length / 4);
         for (let i = 0; i < floats.length; i++) floats[i] = data[i * 4] / 255;
         resolve(floats);
@@ -56,6 +72,7 @@ class MnistData {
 
   async _fetchLabels() {
     const res = await fetch(MNIST_LABELS_URL);
+    if (!res.ok) throw new Error(`Failed to fetch MNIST labels (${res.status})`);
     return res.arrayBuffer();
   }
 
@@ -180,8 +197,13 @@ async function train() {
   chart.classList.remove('hidden');
 
   try {
-    mnist = new MnistData();
+    mnist = new MnistData((pct) => {
+      bar.style.width   = (pct * 50) + '%'; // first 50% of bar = download
+      label.textContent = `Downloading data… ${Math.round(pct * 100)}%`;
+    });
     await mnist.load();
+    bar.style.width   = '50%';
+    label.textContent = 'Data ready — building model…';
     setStatus('training', 'Training…');
 
     model = buildModel();
@@ -209,7 +231,8 @@ async function train() {
         callbacks: {
           onBatchEnd: async () => {
             batchesDone++;
-            bar.style.width = Math.min((batchesDone / totalBatches) * 100, 100) + '%';
+            // progress bar: 50% download + 50% training
+            bar.style.width = Math.min(50 + (batchesDone / totalBatches) * 50, 100) + '%';
             await tf.nextFrame();
           },
         },
