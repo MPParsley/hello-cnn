@@ -2,16 +2,15 @@
 
 const EPOCHS = 10;
 const BATCH_SIZE = 512;
-const TRAIN_SIZE = 55000;
-const TEST_SIZE = 10000;
-const IMAGE_SIZE = 784; // 28*28
+const TRAIN_SIZE = 10_000;
+const TEST_SIZE  = 2_000;
+const IMAGE_SIZE = 784; // 28×28
 
 // ─── MNIST Data Loader ────────────────────────────────────────────────────────
-// Files are bundled into the gh-pages branch by CI so they're same-origin.
-const MNIST_IMAGES_URL = './data/mnist_images.png';
-const MNIST_LABELS_URL = './data/mnist_labels_uint8';
-// Total compressed size is ~12 MB; report progress so the user isn't left waiting.
-const MNIST_IMAGES_BYTES = 11_800_000;
+// CI writes a 10 000-train + 2 000-test subset as raw uint8 binaries (~9.5 MB).
+const MNIST_IMAGES_URL = './data/mnist_images.bin';
+const MNIST_LABELS_URL = './data/mnist_labels.bin';
+const MNIST_IMAGES_BYTES = (TRAIN_SIZE + TEST_SIZE) * IMAGE_SIZE; // ~9.4 MB
 
 class MnistData {
   constructor(onProgress) {
@@ -23,24 +22,25 @@ class MnistData {
   }
 
   async load() {
-    const [flatImages, labelBuffer] = await Promise.all([
-      this._fetchImage(),
-      this._fetchLabels(),
+    const [imgBuffer, labelBuffer] = await Promise.all([
+      this._stream(MNIST_IMAGES_URL, MNIST_IMAGES_BYTES),
+      this._stream(MNIST_LABELS_URL, 0),
     ]);
     const N = TRAIN_SIZE + TEST_SIZE;
+    const allImages = new Uint8Array(imgBuffer);
     const allLabels = new Uint8Array(labelBuffer);
 
-    this.trainImages = flatImages.slice(0, IMAGE_SIZE * TRAIN_SIZE);
-    this.testImages  = flatImages.slice(IMAGE_SIZE * TRAIN_SIZE, IMAGE_SIZE * N);
-    this.trainLabels = allLabels.slice(0, 10 * TRAIN_SIZE);
-    this.testLabels  = allLabels.slice(10 * TRAIN_SIZE, 10 * N);
+    // Keep as Uint8Array — normalization happens per-batch inside tf.tidy().
+    this.trainImages = allImages.subarray(0, IMAGE_SIZE * TRAIN_SIZE);
+    this.testImages  = allImages.subarray(IMAGE_SIZE * TRAIN_SIZE, IMAGE_SIZE * N);
+    this.trainLabels = allLabels.subarray(0, 10 * TRAIN_SIZE);
+    this.testLabels  = allLabels.subarray(10 * TRAIN_SIZE, 10 * N);
   }
 
-  async _fetchImage() {
-    // Stream the response so we can report download progress.
-    const res = await fetch(MNIST_IMAGES_URL);
-    if (!res.ok) throw new Error(`Failed to fetch MNIST images (${res.status})`);
-    const total = parseInt(res.headers.get('content-length') || '0') || MNIST_IMAGES_BYTES;
+  async _stream(url, fallbackTotal) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Fetch failed: ${url} (${res.status})`);
+    const total = parseInt(res.headers.get('content-length') || '0') || fallbackTotal;
     const reader = res.body.getReader();
     const chunks = [];
     let received = 0;
@@ -49,31 +49,14 @@ class MnistData {
       if (done) break;
       chunks.push(value);
       received += value.length;
-      this._onProgress(received / total);
+      if (total) this._onProgress(received / total);
     }
-    const blob = new Blob(chunks);
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width  = img.width;
-        canvas.height = img.height;
-        const ctx  = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        const data   = ctx.getImageData(0, 0, img.width, img.height).data;
-        const floats = new Float32Array(data.length / 4);
-        for (let i = 0; i < floats.length; i++) floats[i] = data[i * 4] / 255;
-        resolve(floats);
-      };
-      img.onerror = reject;
-      img.src = URL.createObjectURL(blob);
-    });
-  }
-
-  async _fetchLabels() {
-    const res = await fetch(MNIST_LABELS_URL);
-    if (!res.ok) throw new Error(`Failed to fetch MNIST labels (${res.status})`);
-    return res.arrayBuffer();
+    // Concatenate chunks then immediately drop the chunk array so GC can reclaim it.
+    const out = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+    chunks.length = 0;
+    return out.buffer;
   }
 
   getTrainBatch(batchSize) {
@@ -87,10 +70,11 @@ class MnistData {
   _getBatch(images, labels, total, n) {
     return tf.tidy(() => {
       const start = Math.floor(Math.random() * (total - n));
-      const xs = tf.tensor4d(
+      // Slice uint8, create tensor, normalise to [0,1] — only allocates for this batch.
+      const xs = tf.tensor(
         images.slice(start * IMAGE_SIZE, (start + n) * IMAGE_SIZE),
-        [n, 28, 28, 1]
-      );
+        [n, 28, 28, 1], 'int32'
+      ).toFloat().div(255);
       const ys = tf.tensor2d(
         labels.slice(start * 10, (start + n) * 10),
         [n, 10]
