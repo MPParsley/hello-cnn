@@ -2,16 +2,15 @@
 
 const EPOCHS = 10;
 const BATCH_SIZE = 512;
-const TRAIN_SIZE = 55000;
-const TEST_SIZE = 10000;
-const IMAGE_SIZE = 784; // 28*28
+const TRAIN_SIZE = 10_000;
+const TEST_SIZE  = 2_000;
+const IMAGE_SIZE = 784; // 28×28
 
 // ─── MNIST Data Loader ────────────────────────────────────────────────────────
-// CI converts the PNG sprite to a raw uint8 binary (1 byte per pixel, no alpha).
-// This avoids decoding a 784×65000 canvas in the browser (~400 MB peak → ~50 MB).
+// CI writes a 10 000-train + 2 000-test subset as raw uint8 binaries (~9.5 MB).
 const MNIST_IMAGES_URL = './data/mnist_images.bin';
-const MNIST_LABELS_URL = './data/mnist_labels_uint8';
-const MNIST_IMAGES_BYTES = 50_960_000; // 65000 × 784
+const MNIST_LABELS_URL = './data/mnist_labels.bin';
+const MNIST_IMAGES_BYTES = (TRAIN_SIZE + TEST_SIZE) * IMAGE_SIZE; // ~9.4 MB
 
 class MnistData {
   constructor(onProgress) {
@@ -52,10 +51,11 @@ class MnistData {
       received += value.length;
       if (total) this._onProgress(received / total);
     }
-    // Concatenate chunks into a single ArrayBuffer.
+    // Concatenate chunks then immediately drop the chunk array so GC can reclaim it.
     const out = new Uint8Array(received);
     let offset = 0;
     for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+    chunks.length = 0;
     return out.buffer;
   }
 
