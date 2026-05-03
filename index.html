@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>Hello CNN</h1>
-    <p class="subtitle">A convolutional neural network that learns to read handwritten digits — running entirely in your browser. Mobile uses a smaller dataset and CPU backend to stay within memory limits.</p>
+    <p class="subtitle">A convolutional neural network trained on 60,000 handwritten digits — draw one and watch it classify in real time.</p>
   </header>
 
   <main>
@@ -59,21 +59,20 @@
     </section>
 
     <section class="training-section">
-      <h2>Step 1 — Train the Model</h2>
-      <p>Click <strong>Train</strong> to load MNIST data and train the CNN in your browser using TensorFlow.js. Training takes about 15–30 seconds.</p>
+      <h2>Training Results</h2>
+      <p>The model was trained by CI on the full MNIST dataset (60,000 examples, 10 epochs) using Python and TensorFlow, then exported as TF.js weights.</p>
+
       <div class="training-controls">
-        <button id="trainBtn" type="button" class="btn primary">Train CNN</button>
-        <div id="status" class="status idle">Ready to train</div>
+        <div id="status" class="status training">Loading model…</div>
       </div>
 
-      <div id="progressContainer" class="progress-container hidden">
+      <div id="progressContainer" class="progress-container">
         <div class="progress-bar-wrap">
           <div id="progressBar" class="progress-bar"></div>
         </div>
-        <div id="progressLabel" class="progress-label">Epoch 0 / 10</div>
       </div>
 
-      <div id="metrics" class="metrics hidden">
+      <div id="metricsSection" class="metrics hidden">
         <div class="metric-card">
           <div class="metric-value" id="metricAcc">—</div>
           <div class="metric-label">Train Accuracy</div>
@@ -95,7 +94,7 @@
     </section>
 
     <section id="drawSection" class="draw-section hidden">
-      <h2>Step 2 — Draw a Digit</h2>
+      <h2>Draw a Digit</h2>
       <p>Draw any digit (0–9) on the canvas below and the CNN will classify it.</p>
       <div class="draw-area">
         <div class="canvas-wrap">

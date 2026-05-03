@@ -20,22 +20,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate HTML
+      - name: Train CNN and export to TF.js
         run: |
-          npx --yes html-validate \
-            --config='{"extends":["html-validate:recommended"],"rules":{"no-trailing-whitespace":"off","void-style":"off"}}' \
-            index.html || true
-
-      - name: Download and convert MNIST data
-        run: |
-          pip3 install --quiet Pillow numpy
-          curl -fL --retry 3 \
-            "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
-            -o /tmp/mnist_images.png
-          curl -fL --retry 3 \
-            "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
-            -o /tmp/mnist_labels_uint8
-          python3 scripts/prepare_mnist.py
+          pip3 install --quiet tensorflow tensorflowjs
+          python3 scripts/train_model.py
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
