@@ -57,7 +57,9 @@ jobs:
           python scripts/prepare_mnist.py
 
       - name: Deploy to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
+        # Remove .gitignore first: peaceiris uses `git add --all` which
+        # respects it, so model/ and data/ would be silently excluded.
+        run: rm .gitignore
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .
