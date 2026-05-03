@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>Hello CNN</h1>
-    <p class="subtitle">A convolutional neural network trained on 60,000 handwritten digits — draw one and watch it classify in real time.</p>
+    <p class="subtitle">A convolutional neural network that recognises handwritten digits — explore the architecture, load a pre-trained model, or train one yourself.</p>
   </header>
 
   <main>
@@ -59,43 +59,104 @@
     </section>
 
     <section class="training-section">
-      <h2>Training Results</h2>
-      <p>The model was trained by CI on the full MNIST dataset (60,000 examples, 10 epochs) using Python and TensorFlow, then exported as TF.js weights.</p>
-
-      <div class="training-controls">
-        <div id="status" class="status training">Loading model…</div>
+      <div class="mode-toggle">
+        <button type="button" id="modePreBtn" class="mode-btn active">Pre-trained</button>
+        <button type="button" id="modeTrainBtn" class="mode-btn">Train in browser</button>
       </div>
 
-      <div id="progressContainer" class="progress-container">
-        <div class="progress-bar-wrap">
-          <div id="progressBar" class="progress-bar"></div>
+      <!-- ── Pre-trained panel ─────────────────────────────── -->
+      <div id="prePanel">
+        <p>Load weights trained by CI on the full MNIST dataset (60,000 examples, 10 epochs). Works on any device.</p>
+        <div class="training-controls">
+          <div id="preStatus" class="status training">Loading model…</div>
+        </div>
+        <div class="progress-container">
+          <div class="progress-bar-wrap">
+            <div id="preProgressBar" class="progress-bar"></div>
+          </div>
+        </div>
+        <div id="preMetrics" class="metrics hidden">
+          <div class="metric-card">
+            <div class="metric-value" id="preMetricAcc">—</div>
+            <div class="metric-label">Train Accuracy</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value" id="preMetricLoss">—</div>
+            <div class="metric-label">Train Loss</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value" id="preMetricValAcc">—</div>
+            <div class="metric-label">Val Accuracy</div>
+          </div>
+        </div>
+        <div id="preLossChart" class="loss-chart hidden">
+          <h3>Training Curves (CI run, full MNIST)</h3>
+          <canvas id="preChartCanvas" width="600" height="220"></canvas>
         </div>
       </div>
 
-      <div id="metricsSection" class="metrics hidden">
-        <div class="metric-card">
-          <div class="metric-value" id="metricAcc">—</div>
-          <div class="metric-label">Train Accuracy</div>
+      <!-- ── Train in browser panel ────────────────────────── -->
+      <div id="trainPanel" class="hidden">
+        <p id="trainDesc">Choose a training set size and click <strong>Train</strong>. Larger sets take longer but reach higher accuracy.</p>
+        <div id="mobileWarning" class="mobile-warning hidden">
+          ⚠️ In-browser training can crash on mobile. The pre-trained option is recommended for phones.
         </div>
-        <div class="metric-card">
-          <div class="metric-value" id="metricLoss">—</div>
-          <div class="metric-label">Train Loss</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-value" id="metricValAcc">—</div>
-          <div class="metric-label">Val Accuracy</div>
-        </div>
-      </div>
 
-      <div id="lossChart" class="loss-chart hidden">
-        <h3>Training Curves</h3>
-        <canvas id="chartCanvas" width="600" height="220"></canvas>
+        <div class="size-options">
+          <label class="size-option">
+            <input type="radio" name="trainSize" value="1k">
+            <span class="size-label">Small</span>
+            <span class="size-detail">1,000 examples · ~1 MB · ~90% accuracy</span>
+          </label>
+          <label class="size-option">
+            <input type="radio" name="trainSize" value="3k" checked>
+            <span class="size-label">Medium</span>
+            <span class="size-detail">3,000 examples · ~2.5 MB · ~93% accuracy</span>
+          </label>
+          <label class="size-option">
+            <input type="radio" name="trainSize" value="10k">
+            <span class="size-label">Large</span>
+            <span class="size-detail">10,000 examples · ~9 MB · ~96% accuracy</span>
+          </label>
+        </div>
+
+        <div class="training-controls">
+          <button id="trainBtn" type="button" class="btn primary">Train CNN</button>
+          <div id="trainStatus" class="status idle">Ready</div>
+        </div>
+
+        <div id="trainProgressContainer" class="progress-container hidden">
+          <div class="progress-bar-wrap">
+            <div id="trainProgressBar" class="progress-bar"></div>
+          </div>
+          <div id="trainProgressLabel" class="progress-label"></div>
+        </div>
+
+        <div id="trainMetrics" class="metrics hidden">
+          <div class="metric-card">
+            <div class="metric-value" id="trainMetricAcc">—</div>
+            <div class="metric-label">Train Accuracy</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value" id="trainMetricLoss">—</div>
+            <div class="metric-label">Train Loss</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-value" id="trainMetricValAcc">—</div>
+            <div class="metric-label">Val Accuracy</div>
+          </div>
+        </div>
+
+        <div id="trainLossChart" class="loss-chart hidden">
+          <h3>Training Curves</h3>
+          <canvas id="trainChartCanvas" width="600" height="220"></canvas>
+        </div>
       </div>
     </section>
 
     <section id="drawSection" class="draw-section hidden">
       <h2>Draw a Digit</h2>
-      <p>Draw any digit (0–9) on the canvas below and the CNN will classify it.</p>
+      <p>Draw any digit (0–9) and the CNN classifies it in real time.</p>
       <div class="draw-area">
         <div class="canvas-wrap">
           <canvas id="drawCanvas" width="280" height="280"></canvas>
@@ -109,7 +170,6 @@
       <div class="draw-controls">
         <button id="clearBtn" type="button" class="btn secondary">Clear</button>
       </div>
-
       <div id="featureMapsSection" class="feature-maps-section hidden">
         <h3>What the CNN Sees</h3>
         <p class="fmap-note">First convolutional layer activations (8 filters) for your drawing.</p>
