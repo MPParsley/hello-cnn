@@ -26,15 +26,25 @@ jobs:
             --config='{"extends":["html-validate:recommended"],"rules":{"no-trailing-whitespace":"off","void-style":"off"}}' \
             index.html || true
 
-      - name: Download MNIST data
+      - name: Download and convert MNIST data
         run: |
           mkdir -p data
+          pip3 install --quiet Pillow numpy
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
-            -o data/mnist_images.png
+            -o /tmp/mnist_images.png
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
             -o data/mnist_labels_uint8
+          python3 - <<'EOF'
+import numpy as np
+from PIL import Image
+# Decode the PNG sprite sheet to raw grayscale uint8 bytes.
+# Shape is (65000, 784) — one flattened 28x28 image per row.
+arr = np.array(Image.open('/tmp/mnist_images.png').convert('L'), dtype=np.uint8)
+arr.tofile('data/mnist_images.bin')
+print(f'mnist_images.bin: {arr.shape} → {arr.size:,} bytes')
+EOF
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
