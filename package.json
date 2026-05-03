@@ -1,0 +1,11 @@
+{
+  "name": "hello-cnn",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "train": "node scripts/train_model.js"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs-node": "^4.20.0"
+  }
+}

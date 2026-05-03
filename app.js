@@ -1,144 +1,42 @@
 'use strict';
 
-// On mobile, use a smaller dataset and batch to stay within memory limits.
-const MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
+const IMAGE_SIZE = 784;
 const EPOCHS     = 10;
-const BATCH_SIZE = MOBILE ? 64   : 512;
-const TRAIN_SIZE = MOBILE ? 3000 : 10_000;
-const TEST_SIZE  = MOBILE ? 500  : 2_000;
-const IMAGE_SIZE = 784; // 28×28
+const MOBILE     = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-// ─── MNIST Data Loader ────────────────────────────────────────────────────────
-// CI writes a 10 000-train + 2 000-test subset as raw uint8 binaries (~9.5 MB).
-// Mobile only needs the first 3 500 rows of the images file.
-const MNIST_IMAGES_URL = './data/mnist_images.bin';
-const MNIST_LABELS_URL = './data/mnist_labels.bin';
-const MNIST_IMAGES_BYTES = (TRAIN_SIZE + TEST_SIZE) * IMAGE_SIZE;
+const TRAIN_CONFIGS = {
+  '1k':  { trainSize: 1_000, testSize:   500, batchSize: 128, imageUrl: './data/mnist_images_1k.bin',  labelUrl: './data/mnist_labels_1k.bin'  },
+  '3k':  { trainSize: 3_000, testSize:   500, batchSize: 256, imageUrl: './data/mnist_images_3k.bin',  labelUrl: './data/mnist_labels_3k.bin'  },
+  '10k': { trainSize: 10_000, testSize: 2_000, batchSize: 512, imageUrl: './data/mnist_images_10k.bin', labelUrl: './data/mnist_labels_10k.bin' },
+};
 
-class MnistData {
-  constructor(onProgress) {
-    this.trainImages = null;
-    this.testImages  = null;
-    this.trainLabels = null;
-    this.testLabels  = null;
-    this._onProgress = onProgress || (() => {});
-  }
+let model = null;
 
-  async load() {
-    const [imgBuffer, labelBuffer] = await Promise.all([
-      this._stream(MNIST_IMAGES_URL, MNIST_IMAGES_BYTES),
-      this._stream(MNIST_LABELS_URL, 0),
-    ]);
-    const N = TRAIN_SIZE + TEST_SIZE;
-    const allImages = new Uint8Array(imgBuffer);
-    const allLabels = new Uint8Array(labelBuffer);
-
-    // Keep as Uint8Array — normalization happens per-batch inside tf.tidy().
-    this.trainImages = allImages.subarray(0, IMAGE_SIZE * TRAIN_SIZE);
-    this.testImages  = allImages.subarray(IMAGE_SIZE * TRAIN_SIZE, IMAGE_SIZE * N);
-    this.trainLabels = allLabels.subarray(0, 10 * TRAIN_SIZE);
-    this.testLabels  = allLabels.subarray(10 * TRAIN_SIZE, 10 * N);
-  }
-
-  async _stream(url, knownBytes) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Fetch failed: ${url} (${res.status})`);
-    // Do NOT use content-length: GitHub Pages gzip-encodes responses, so
-    // content-length reflects the compressed size while the reader yields
-    // decompressed bytes — causing received/total to wildly exceed 100%.
-    const reader = res.body.getReader();
-    const chunks = [];
-    let received = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (knownBytes) this._onProgress(Math.min(received / knownBytes, 1));
-    }
-    // Concatenate chunks then immediately drop the chunk array so GC can reclaim it.
-    const out = new Uint8Array(received);
-    let offset = 0;
-    for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
-    chunks.length = 0;
-    return out.buffer;
-  }
-
-  getTrainBatch(batchSize) {
-    return this._getBatch(this.trainImages, this.trainLabels, TRAIN_SIZE, batchSize);
-  }
-
-  getTestData(n = 1000) {
-    return this._getBatch(this.testImages, this.testLabels, TEST_SIZE, n);
-  }
-
-  _getBatch(images, labels, total, n) {
-    return tf.tidy(() => {
-      const start = Math.floor(Math.random() * (total - n));
-      // Slice uint8, create tensor, normalise to [0,1] — only allocates for this batch.
-      const xs = tf.tensor(
-        images.slice(start * IMAGE_SIZE, (start + n) * IMAGE_SIZE),
-        [n, 28, 28, 1], 'int32'
-      ).toFloat().div(255);
-      const ys = tf.tensor2d(
-        labels.slice(start * 10, (start + n) * 10),
-        [n, 10]
-      );
-      return { xs, ys };
-    });
-  }
-}
-
-// ─── Model ───────────────────────────────────────────────────────────────────
-function buildModel() {
-  const model = tf.sequential();
-  model.add(tf.layers.conv2d({ inputShape: [28, 28, 1], kernelSize: 3, filters: 8, activation: 'relu' }));
-  model.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
-  model.add(tf.layers.conv2d({ kernelSize: 3, filters: 16, activation: 'relu' }));
-  model.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
-  model.add(tf.layers.flatten());
-  model.add(tf.layers.dense({ units: 64, activation: 'relu' }));
-  model.add(tf.layers.dense({ units: 10, activation: 'softmax' }));
-  model.compile({ optimizer: 'adam', loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
-  return model;
-}
-
-// ─── Chart ───────────────────────────────────────────────────────────────────
-const chartData = { trainLoss: [], trainAcc: [], valAcc: [] };
-
-function drawChart() {
-  const canvas = document.getElementById('chartCanvas');
+// ─── Shared chart ─────────────────────────────────────────────────────────────
+function drawChart(canvasId, history) {
+  const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   const PAD = { top: 20, right: 20, bottom: 40, left: 50 };
   const w = W - PAD.left - PAD.right;
   const h = H - PAD.top - PAD.bottom;
+  const n = history.acc.length;
 
   ctx.clearRect(0, 0, W, H);
-
-  // Background
   ctx.fillStyle = '#1a1d2e';
   ctx.fillRect(0, 0, W, H);
 
-  // Grid
   ctx.strokeStyle = '#2a2d45';
   ctx.lineWidth = 1;
   for (let i = 0; i <= 5; i++) {
     const y = PAD.top + (h / 5) * i;
     ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + w, y); ctx.stroke();
-    ctx.fillStyle = '#9e9eb8';
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'right';
+    ctx.fillStyle = '#9e9eb8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
     ctx.fillText((1 - i / 5).toFixed(1), PAD.left - 6, y + 4);
   }
 
-  const n = chartData.trainLoss.length;
-  if (n < 2) return;
-
   function plotLine(data, color, label, labelY) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
     ctx.beginPath();
     data.forEach((v, i) => {
       const x = PAD.left + (i / (n - 1)) * w;
@@ -146,125 +44,193 @@ function drawChart() {
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
+    ctx.fillStyle = color; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
     ctx.fillText(label, PAD.left + 4, labelY);
   }
 
-  plotLine(chartData.trainAcc,  '#6c63ff', 'Train Acc',  PAD.top + 14);
-  plotLine(chartData.valAcc,    '#43e97b', 'Val Acc',    PAD.top + 28);
-  plotLine(chartData.trainLoss, '#ff6584', 'Train Loss', PAD.top + 42);
+  plotLine(history.acc,     '#6c63ff', 'Train Acc',  PAD.top + 14);
+  plotLine(history.val_acc, '#43e97b', 'Val Acc',    PAD.top + 28);
+  plotLine(history.loss,    '#ff6584', 'Train Loss', PAD.top + 42);
 
-  // X axis labels
-  ctx.fillStyle = '#9e9eb8';
-  ctx.font = '11px sans-serif';
-  ctx.textAlign = 'center';
+  ctx.fillStyle = '#9e9eb8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
   for (let i = 0; i < n; i++) {
-    const x = PAD.left + (i / (n - 1)) * w;
-    ctx.fillText(i + 1, x, H - PAD.bottom + 16);
+    ctx.fillText(i + 1, PAD.left + (i / (n - 1)) * w, H - PAD.bottom + 16);
   }
   ctx.fillText('Epoch', PAD.left + w / 2, H - 4);
 }
 
-// ─── Training ────────────────────────────────────────────────────────────────
-let model = null;
-let mnist = null;
+// ─── Pre-trained mode ─────────────────────────────────────────────────────────
+async function runPretrained() {
+  const status = document.getElementById('preStatus');
+  const bar    = document.getElementById('preProgressBar');
 
-async function train() {
-  const trainBtn = document.getElementById('trainBtn');
-  const status   = document.getElementById('status');
-  const progress = document.getElementById('progressContainer');
-  const bar      = document.getElementById('progressBar');
-  const label    = document.getElementById('progressLabel');
-  const metrics  = document.getElementById('metrics');
-  const chart    = document.getElementById('lossChart');
+  try {
+    status.className = 'status training';
+    status.textContent = 'Loading model weights…';
+    bar.style.width = '30%';
+
+    model = await tf.loadLayersModel('./model/model.json');
+    bar.style.width = '70%';
+
+    const history = await fetch('./model/history.json').then(r => r.json());
+    bar.style.width = '100%';
+
+    const finalAcc = history.val_acc.at(-1);
+    status.className = 'status done';
+    status.textContent = `Ready — ${(finalAcc * 100).toFixed(1)}% accuracy on MNIST test set`;
+
+    document.getElementById('preMetrics').classList.remove('hidden');
+    document.getElementById('preMetricAcc').textContent    = (history.acc.at(-1)  * 100).toFixed(1) + '%';
+    document.getElementById('preMetricLoss').textContent   = history.loss.at(-1).toFixed(4);
+    document.getElementById('preMetricValAcc').textContent = (finalAcc * 100).toFixed(1) + '%';
+
+    document.getElementById('preLossChart').classList.remove('hidden');
+    drawChart('preChartCanvas', history);
+
+    showDrawSection();
+  } catch (err) {
+    console.error(err);
+    status.className = 'status error';
+    status.textContent = 'Error: ' + err.message;
+  }
+}
+
+// ─── In-browser training mode ─────────────────────────────────────────────────
+async function streamBinary(url, knownBytes, onProgress) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch failed: ${url} (${res.status})`);
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (knownBytes) onProgress(Math.min(received / knownBytes, 1));
+  }
+  const out = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) { out.set(chunk, offset); offset += chunk.length; }
+  chunks.length = 0;
+  return out;
+}
+
+async function runTraining() {
+  const cfg = TRAIN_CONFIGS[document.querySelector('input[name="trainSize"]:checked').value];
+  const { trainSize, testSize, batchSize } = cfg;
+  const totalImages = (trainSize + testSize) * IMAGE_SIZE;
+
+  const status    = document.getElementById('trainStatus');
+  const bar       = document.getElementById('trainProgressBar');
+  const label     = document.getElementById('trainProgressLabel');
+  const container = document.getElementById('trainProgressContainer');
+  const metrics   = document.getElementById('trainMetrics');
+  const chart     = document.getElementById('trainLossChart');
+  const trainBtn  = document.getElementById('trainBtn');
 
   trainBtn.disabled = true;
-  setStatus('training', 'Loading MNIST data…');
-  progress.classList.remove('hidden');
+  container.classList.remove('hidden');
   metrics.classList.remove('hidden');
   chart.classList.remove('hidden');
 
+  const history = { acc: [], loss: [], val_acc: [] };
+
   try {
-    // iOS WebGL is memory-constrained; CPU backend avoids GPU allocation entirely.
-    if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-      await tf.setBackend('cpu');
-    }
-    mnist = new MnistData((pct) => {
-      bar.style.width   = (pct * 50) + '%'; // first 50% of bar = download
-      label.textContent = `Downloading data… ${Math.round(pct * 100)}%`;
-    });
-    await mnist.load();
+    status.className = 'status training';
+    status.textContent = 'Downloading data…';
+
+    const [imgBytes, lblBytes] = await Promise.all([
+      streamBinary(cfg.imageUrl, totalImages, p => {
+        bar.style.width   = (p * 50) + '%';
+        label.textContent = `Downloading… ${Math.round(p * 100)}%`;
+      }),
+      streamBinary(cfg.labelUrl, 0, () => {}),
+    ]);
+
     bar.style.width   = '50%';
-    label.textContent = 'Data ready — building model…';
-    setStatus('training', 'Training…');
+    label.textContent = 'Building model…';
+    status.textContent = 'Training…';
+    await tf.nextFrame();
 
-    model = buildModel();
-    chartData.trainLoss = [];
-    chartData.trainAcc  = [];
-    chartData.valAcc    = [];
+    const allImages = imgBytes;
+    const allLabels = lblBytes;
 
-    // Total batches across all epochs for fine-grained progress
-    const batchesPerEpoch = Math.ceil(BATCH_SIZE * 0.9 / 128);
+    model = tf.sequential();
+    model.add(tf.layers.conv2d({ inputShape: [28, 28, 1], kernelSize: 3, filters: 8,  activation: 'relu' }));
+    model.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
+    model.add(tf.layers.conv2d({ kernelSize: 3, filters: 16, activation: 'relu' }));
+    model.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
+    model.add(tf.layers.flatten());
+    model.add(tf.layers.dense({ units: 64, activation: 'relu' }));
+    model.add(tf.layers.dense({ units: 10, activation: 'softmax' }));
+    model.compile({ optimizer: 'adam', loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+
+    const batchesPerEpoch = Math.ceil(trainSize * 0.9 / batchSize);
     const totalBatches    = EPOCHS * batchesPerEpoch;
     let   batchesDone     = 0;
 
     for (let epoch = 0; epoch < EPOCHS; epoch++) {
-      // Update label at epoch START so the UI never looks frozen
       label.textContent = `Epoch ${epoch + 1} / ${EPOCHS}`;
-      if (epoch === 0) setStatus('training', 'Compiling shaders & training…');
-      await tf.nextFrame(); // yield so the browser paints before heavy work
+      await tf.nextFrame();
 
-      const batch = mnist.getTrainBatch(BATCH_SIZE);
-      const history = await model.fit(batch.xs, batch.ys, {
-        batchSize: 128,
+      const start = Math.floor(Math.random() * (trainSize - batchSize));
+      const xs = tf.tidy(() =>
+        tf.tensor(allImages.slice(start * IMAGE_SIZE, (start + batchSize) * IMAGE_SIZE),
+          [batchSize, 28, 28, 1], 'int32').toFloat().div(255)
+      );
+      const ys = tf.tidy(() =>
+        tf.tensor2d(allLabels.slice(start * 10, (start + batchSize) * 10), [batchSize, 10])
+      );
+
+      const h = await model.fit(xs, ys, {
+        batchSize: Math.min(128, batchSize),
         epochs: 1,
         validationSplit: 0.1,
         shuffle: true,
         callbacks: {
           onBatchEnd: async () => {
             batchesDone++;
-            // progress bar: 50% download + 50% training
             bar.style.width = Math.min(50 + (batchesDone / totalBatches) * 50, 100) + '%';
             await tf.nextFrame();
           },
         },
       });
-      tf.dispose([batch.xs, batch.ys]);
+      tf.dispose([xs, ys]);
 
-      const acc  = history.history.acc?.[0]     ?? history.history.accuracy?.[0]     ?? 0;
-      const loss = history.history.loss?.[0]    ?? 0;
-      const vAcc = history.history.val_acc?.[0] ?? history.history.val_accuracy?.[0] ?? 0;
+      const acc  = h.history.acc?.[0]     ?? h.history.accuracy?.[0]     ?? 0;
+      const loss = h.history.loss?.[0]    ?? 0;
+      const vAcc = h.history.val_acc?.[0] ?? h.history.val_accuracy?.[0] ?? 0;
 
-      chartData.trainAcc.push(acc);
-      chartData.trainLoss.push(loss);
-      chartData.valAcc.push(vAcc);
-      drawChart();
+      history.acc.push(acc);
+      history.loss.push(loss);
+      history.val_acc.push(vAcc);
+      drawChart('trainChartCanvas', history);
 
-      document.getElementById('metricAcc').textContent    = (acc  * 100).toFixed(1) + '%';
-      document.getElementById('metricLoss').textContent   = loss.toFixed(4);
-      document.getElementById('metricValAcc').textContent = (vAcc * 100).toFixed(1) + '%';
-      setStatus('training', `Training… epoch ${epoch + 1} / ${EPOCHS}`);
+      document.getElementById('trainMetricAcc').textContent    = (acc  * 100).toFixed(1) + '%';
+      document.getElementById('trainMetricLoss').textContent   = loss.toFixed(4);
+      document.getElementById('trainMetricValAcc').textContent = (vAcc * 100).toFixed(1) + '%';
+      status.textContent = `Training… epoch ${epoch + 1} / ${EPOCHS}`;
     }
 
-    setStatus('done', `Done — val accuracy ${(chartData.valAcc.at(-1) * 100).toFixed(1)}%`);
-    document.getElementById('drawSection').classList.remove('hidden');
-    document.getElementById('drawSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    status.className = 'status done';
+    status.textContent = `Done — ${(history.val_acc.at(-1) * 100).toFixed(1)}% val accuracy`;
+    showDrawSection();
   } catch (err) {
     console.error(err);
-    setStatus('error', 'Error: ' + err.message);
+    status.className = 'status error';
+    status.textContent = 'Error: ' + err.message;
     trainBtn.disabled = false;
   }
 }
 
-function setStatus(cls, msg) {
-  const el = document.getElementById('status');
-  el.className = 'status ' + cls;
-  el.textContent = msg;
+// ─── Drawing Canvas ───────────────────────────────────────────────────────────
+function showDrawSection() {
+  const sec = document.getElementById('drawSection');
+  sec.classList.remove('hidden');
+  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// ─── Drawing Canvas ───────────────────────────────────────────────────────────
 function initCanvas() {
   const canvas = document.getElementById('drawCanvas');
   const ctx    = canvas.getContext('2d');
@@ -280,36 +246,24 @@ function initCanvas() {
 
   function getPos(e) {
     const r = canvas.getBoundingClientRect();
-    const scaleX = canvas.width  / r.width;
-    const scaleY = canvas.height / r.height;
-    const cx = ((e.touches ? e.touches[0].clientX : e.clientX) - r.left) * scaleX;
-    const cy = ((e.touches ? e.touches[0].clientY : e.clientY) - r.top)  * scaleY;
+    const cx = ((e.touches ? e.touches[0].clientX : e.clientX) - r.left) * (canvas.width  / r.width);
+    const cy = ((e.touches ? e.touches[0].clientY : e.clientY) - r.top)  * (canvas.height / r.height);
     return [cx, cy];
   }
 
   function start(e) {
-    e.preventDefault();
-    drawing = true;
+    e.preventDefault(); drawing = true;
     [lastX, lastY] = getPos(e);
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 9, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(lastX, lastY, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
     predict();
   }
-
   function draw(e) {
-    e.preventDefault();
-    if (!drawing) return;
+    e.preventDefault(); if (!drawing) return;
     const [x, y] = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    [lastX, lastY] = [x, y];
-    predict();
+    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(x, y); ctx.stroke();
+    [lastX, lastY] = [x, y]; predict();
   }
-
   function stop(e) { e.preventDefault(); drawing = false; }
 
   canvas.addEventListener('mousedown',  start);
@@ -321,100 +275,104 @@ function initCanvas() {
   canvas.addEventListener('touchend',   stop,  { passive: false });
 
   document.getElementById('clearBtn').addEventListener('click', () => {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     clearPredBars();
     document.getElementById('featureMapsSection').classList.add('hidden');
   });
 }
 
-// ─── Prediction ──────────────────────────────────────────────────────────────
+// ─── Prediction ───────────────────────────────────────────────────────────────
 function clearPredBars() {
-  const container = document.getElementById('predBars');
-  container.innerHTML = '';
+  const c = document.getElementById('predBars');
+  c.innerHTML = '';
   for (let i = 0; i < 10; i++) {
-    const row = document.createElement('div');
-    row.className = 'pred-row';
-    row.innerHTML = `
-      <span class="pred-digit">${i}</span>
-      <div class="pred-bar-wrap"><div class="pred-bar-fill" id="bar${i}" style="width:0%"></div></div>
-      <span class="pred-pct" id="pct${i}">0%</span>`;
-    container.appendChild(row);
+    c.insertAdjacentHTML('beforeend', `
+      <div class="pred-row">
+        <span class="pred-digit">${i}</span>
+        <div class="pred-bar-wrap"><div class="pred-bar-fill" id="bar${i}" style="width:0%"></div></div>
+        <span class="pred-pct" id="pct${i}">0%</span>
+      </div>`);
   }
 }
 
-function renderPredBars(probs) {
-  const top = probs.indexOf(Math.max(...probs));
-  probs.forEach((p, i) => {
-    const fill = document.getElementById('bar' + i);
-    const pct  = document.getElementById('pct' + i);
-    fill.style.width = (p * 100).toFixed(1) + '%';
-    fill.className = 'pred-bar-fill' + (i === top ? ' top' : '');
-    pct.textContent = (p * 100).toFixed(0) + '%';
-  });
-}
-
 let predTimeout = null;
-
 function predict() {
   if (!model) return;
   clearTimeout(predTimeout);
   predTimeout = setTimeout(() => {
     tf.tidy(() => {
-      const canvas = document.getElementById('drawCanvas');
-      const raw    = tf.browser.fromPixels(canvas, 1).toFloat();
-      const scaled = tf.image.resizeBilinear(raw, [28, 28]).div(255);
-      const input  = scaled.reshape([1, 28, 28, 1]);
-      const probs  = Array.from(model.predict(input).dataSync());
-      renderPredBars(probs);
+      const input = tf.browser.fromPixels(document.getElementById('drawCanvas'), 1)
+        .toFloat().div(255).resizeBilinear([28, 28]).reshape([1, 28, 28, 1]);
+      const probs = Array.from(model.predict(input).dataSync());
+      const top   = probs.indexOf(Math.max(...probs));
+      probs.forEach((p, i) => {
+        document.getElementById('bar' + i).style.width    = (p * 100).toFixed(1) + '%';
+        document.getElementById('bar' + i).className      = 'pred-bar-fill' + (i === top ? ' top' : '');
+        document.getElementById('pct' + i).textContent    = (p * 100).toFixed(0) + '%';
+      });
       showFeatureMaps(input);
     });
   }, 30);
 }
 
-// ─── Feature Maps ─────────────────────────────────────────────────────────────
 async function showFeatureMaps(input) {
-  const section = document.getElementById('featureMapsSection');
+  const section   = document.getElementById('featureMapsSection');
   const container = document.getElementById('featureMaps');
-
-  const conv1 = model.layers[0];
-  const subModel = tf.model({ inputs: model.inputs, outputs: conv1.output });
-  const fmaps = subModel.predict(input);
-  const [, fH, fW, numFilters] = fmaps.shape;
+  const sub   = tf.model({ inputs: model.inputs, outputs: model.layers[0].output });
+  const fmaps = sub.predict(input);
+  const [, fH, fW, nF] = fmaps.shape;
   const data = await fmaps.array();
   tf.dispose(fmaps);
-
   container.innerHTML = '';
-  for (let f = 0; f < numFilters; f++) {
-    const canvas = document.createElement('canvas');
-    canvas.width = fW;
-    canvas.height = fH;
-    const ctx = canvas.getContext('2d');
+  for (let f = 0; f < nF; f++) {
+    const c = document.createElement('canvas');
+    c.width = fW; c.height = fH;
+    const ctx = c.getContext('2d');
     const img = ctx.createImageData(fW, fH);
-    let min = Infinity, max = -Infinity;
+    let mn = Infinity, mx = -Infinity;
     for (let y = 0; y < fH; y++) for (let x = 0; x < fW; x++) {
-      const v = data[0][y][x][f];
-      if (v < min) min = v;
-      if (v > max) max = v;
+      const v = data[0][y][x][f]; if (v < mn) mn = v; if (v > mx) mx = v;
     }
-    const range = max - min || 1;
+    const rng = mx - mn || 1;
     for (let y = 0; y < fH; y++) for (let x = 0; x < fW; x++) {
       const idx = (y * fW + x) * 4;
-      const v   = Math.round(((data[0][y][x][f] - min) / range) * 255);
-      img.data[idx]     = v;
-      img.data[idx + 1] = Math.round(v * 0.4);
-      img.data[idx + 2] = 255;
-      img.data[idx + 3] = 255;
+      const v   = Math.round(((data[0][y][x][f] - mn) / rng) * 255);
+      img.data[idx] = v; img.data[idx+1] = Math.round(v * 0.4);
+      img.data[idx+2] = 255; img.data[idx+3] = 255;
     }
     ctx.putImageData(img, 0, 0);
-    container.appendChild(canvas);
+    container.appendChild(c);
   }
   section.classList.remove('hidden');
+}
+
+// ─── Mode toggle ──────────────────────────────────────────────────────────────
+function initModeToggle() {
+  if (MOBILE) {
+    document.getElementById('mobileWarning').classList.remove('hidden');
+  }
+
+  document.getElementById('modePreBtn').addEventListener('click', () => {
+    document.getElementById('modePreBtn').classList.add('active');
+    document.getElementById('modeTrainBtn').classList.remove('active');
+    document.getElementById('prePanel').classList.remove('hidden');
+    document.getElementById('trainPanel').classList.add('hidden');
+  });
+
+  document.getElementById('modeTrainBtn').addEventListener('click', () => {
+    document.getElementById('modeTrainBtn').classList.add('active');
+    document.getElementById('modePreBtn').classList.remove('active');
+    document.getElementById('trainPanel').classList.remove('hidden');
+    document.getElementById('prePanel').classList.add('hidden');
+  });
+
+  document.getElementById('trainBtn').addEventListener('click', runTraining);
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   clearPredBars();
   initCanvas();
-  document.getElementById('trainBtn').addEventListener('click', train);
+  initModeToggle();
+  runPretrained(); // start loading pre-trained model automatically
 });
