@@ -57,6 +57,14 @@ jobs:
             -o /tmp/mnist_labels_uint8
           python scripts/prepare_mnist.py
 
+      # ── Stage site files (exclude node_modules, scripts, etc.) ──────────
+      - name: Stage site for deployment
+        run: |
+          mkdir -p dist
+          cp index.html style.css app.js dist/
+          cp -r model dist/model
+          cp -r data  dist/data
+
       # ── Deploy ────────────────────────────────────────────────────────────
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -64,7 +72,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: 'dist'
 
       - name: Deploy to GitHub Pages
         id: deployment
