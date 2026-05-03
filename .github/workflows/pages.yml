@@ -28,7 +28,6 @@ jobs:
 
       - name: Download and convert MNIST data
         run: |
-          mkdir -p data
           pip3 install --quiet Pillow numpy
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png" \
@@ -36,26 +35,7 @@ jobs:
           curl -fL --retry 3 \
             "https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8" \
             -o /tmp/mnist_labels_uint8
-          python3 - <<'EOF'
-import numpy as np
-from PIL import Image
-
-# Original layout: rows 0-54999 = training, rows 55000-64999 = test.
-# We only need a subset for the demo — 10 000 train + 2 000 test = ~9.4 MB.
-N_TRAIN, N_TEST = 10_000, 2_000
-
-imgs = np.array(Image.open('/tmp/mnist_images.png').convert('L'), dtype=np.uint8)
-train_imgs = imgs[:N_TRAIN]
-test_imgs  = imgs[55_000 : 55_000 + N_TEST]
-np.concatenate([train_imgs, test_imgs]).tofile('data/mnist_images.bin')
-
-labels = np.frombuffer(open('/tmp/mnist_labels_uint8', 'rb').read(), dtype=np.uint8)
-train_labels = labels[:N_TRAIN * 10]
-test_labels  = labels[55_000 * 10 : (55_000 + N_TEST) * 10]
-np.concatenate([train_labels, test_labels]).tofile('data/mnist_labels.bin')
-
-print(f'images: {(N_TRAIN+N_TEST)*784:,} bytes  labels: {(N_TRAIN+N_TEST)*10:,} bytes')
-EOF
+          python3 scripts/prepare_mnist.py
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
